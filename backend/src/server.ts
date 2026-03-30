@@ -1,0 +1,52 @@
+import express from 'express';
+import cors from 'cors';
+import http from 'node:http';
+import path from 'node:path';
+import { env } from './config/env.js';
+import { inicializarSeed } from './db/seed.js';
+import { iniciarHub } from './realtime/hub.js';
+import { authRouter } from './modulos/auth/routes.js';
+import { ventasRouter } from './modulos/ventas/routes.js';
+import { cxcRouter } from './modulos/cxc/routes.js';
+import { cuadreRouter } from './modulos/cuadres/routes.js';
+import { productosRouter } from './modulos/productos/routes.js';
+import { clientesRouter } from './modulos/clientes/routes.js';
+import { reportesRouter } from './modulos/reportes/routes.js';
+import { usuariosRouter } from './modulos/usuarios/routes.js';
+import { dashboardRouter } from './modulos/dashboard/routes.js';
+import { adminRouter } from './modulos/admin/routes.js';
+import { maestrosRouter } from './modulos/maestros/routes.js';
+import { comprasRouter } from './modulos/compras/routes.js';
+import { importadorRouter } from './modulos/importador/routes.js';
+import { uploadsRouter } from './modulos/uploads/routes.js';
+import { notasCreditoRouter } from './modulos/notas-credito/routes.js';
+
+inicializarSeed();
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '100mb' }));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+
+app.get('/salud', (_req, res) => res.json({ ok: true, servicio: 'POS Repuestos Calcaño', fecha: new Date().toISOString() }));
+app.use('/api/auth', authRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/ventas', ventasRouter);
+app.use('/api/cxc', cxcRouter);
+app.use('/api/cuadres', cuadreRouter);
+app.use('/api/productos', productosRouter);
+app.use('/api/clientes', clientesRouter);
+app.use('/api/usuarios', usuariosRouter);
+app.use('/api/reportes', reportesRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/maestros', maestrosRouter);
+app.use('/api/compras', comprasRouter);
+app.use('/api/importador', importadorRouter);
+app.use('/api/uploads', uploadsRouter);
+app.use('/api/notas-credito', notasCreditoRouter);
+
+const server = http.createServer(app);
+iniciarHub(server);
+server.listen(env.puerto, () => {
+  console.log(`Servidor POS local escuchando en puerto ${env.puerto}`);
+});
