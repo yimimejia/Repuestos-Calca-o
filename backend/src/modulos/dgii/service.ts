@@ -9,6 +9,7 @@ const cleanRnc = (v: any) => clean(v).replace(/\D/g, '');
 
 let runningSync: Promise<{ ok: boolean; foundAfterSync?: boolean; message?: string }> | null = null;
 let timer: NodeJS.Timeout | null = null;
+let lastAutoRunKey = '';
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -40,16 +41,43 @@ async function download(url: string) {
 
 function parseZipRows(buffer: Buffer, format: 'csv' | 'txt') {
   const zip = new AdmZip(buffer);
-  const entries = zip.getEntries().filter((e) => !e.isDirectory);
+  const entries = zip.getEntries().filter((e: AdmZip.IZipEntry) => !e.isDirectory);
   if (entries.length === 0) throw new Error('ZIP vacío');
   const raw = entries[0].getData().toString('utf-8');
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = raw.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
 
   if (format === 'csv') {
-    const headers = lines[0].split(/[,;\t]/).map((h) => h.toLowerCase().trim());
-    return lines.slice(1).map((l) => {
-      const cols = l.split(/[,;\t]/).map((c) => c.trim());
+    const parseCsvLine = (line: string) => {
+      const cols: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          const next = line[i + 1];
+          if (inQuotes && next === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+          continue;
+        }
+        if (!inQuotes && (ch === ',' || ch === ';' || ch === '\t')) {
+          cols.push(current.trim());
+          current = '';
+          continue;
+        }
+        current += ch;
+      }
+      cols.push(current.trim());
+      return cols;
+    };
+
+    const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
+    return lines.slice(1).map((l: string) => {
+      const cols = parseCsvLine(l);
       const get = (...keys: string[]) => {
         const idx = headers.findIndex((h) => keys.some((k) => h.includes(k)));
         return idx >= 0 ? cols[idx] : '';
@@ -68,8 +96,8 @@ function parseZipRows(buffer: Buffer, format: 'csv' | 'txt') {
     });
   }
 
-  return lines.slice(1).map((l) => {
-    const cols = l.split('|').map((c) => c.trim());
+  return lines.slice(1).map((l: string) => {
+      const cols = l.split('|').map((c: string) => c.trim());
     return {
       rnc: cleanRnc(cols[0]),
       razon_social: clean(cols[1]),
@@ -142,6 +170,16 @@ export async function syncCatalog(tipoEjecucion: 'automatica' | 'manual' | 'vali
   return out;
 }
 
+function parseCronHourMinute(expr: string) {
+  const [minuteRaw, hourRaw] = String(expr || '').trim().split(/\s+/);
+  const minute = Number(minuteRaw);
+  const hour = Number(hourRaw);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59 || !Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return { minute: 0, hour: 3 };
+  }
+  return { minute, hour };
+}
+
 function immediateAllowed() {
   const now = new Date();
   const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
@@ -191,14 +229,20 @@ export function dgiiStatus() {
   const error = db.prepare("SELECT * FROM dgii_rnc_sync_log WHERE estado='error' ORDER BY inicio DESC LIMIT 1").get() as any;
   const count = db.prepare('SELECT COUNT(*) as c FROM dgii_rnc').get() as any;
   const logs = db.prepare('SELECT * FROM dgii_rnc_sync_log ORDER BY inicio DESC LIMIT 20').all();
-  return { ultimo_ok: ultimo, ultimo_error: error, total_registros: Number(count.c), logs };
+  const ultimaValidacionInmediata = db.prepare("SELECT * FROM dgii_rnc_sync_log WHERE tipo_ejecucion='validacion_inmediata' ORDER BY inicio DESC LIMIT 1").get() as any;
+  return { ultimo_ok: ultimo, ultimo_error: error, total_registros: Number(count.c), logs, sync_en_progreso: Boolean(runningSync), ultima_validacion_inmediata: ultimaValidacionInmediata };
 }
 
 export function startDgiiSyncJob() {
   if (!env.dgiiRncSyncEnabled) return;
   if (timer) clearInterval(timer);
+  const cron = parseCronHourMinute(env.dgiiRncSyncCron);
   timer = setInterval(() => {
     const d = new Date();
-    if (d.getHours() === 3 && d.getMinutes() === 0) syncCatalog('automatica');
+    const key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+    if (d.getUTCHours() === cron.hour && d.getUTCMinutes() === cron.minute && lastAutoRunKey !== key) {
+      lastAutoRunKey = key;
+      syncCatalog('automatica');
+    }
   }, 60_000);
 }

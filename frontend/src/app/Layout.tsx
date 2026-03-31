@@ -17,13 +17,14 @@ interface LayoutProps {
   esDashboard?: boolean;
   bannerRed?: { tipo: 'ok' | 'warning'; texto: string } | null;
   kpis: Array<{ titulo: string; valor: string; subtitulo: string; tono: 'azul' | 'rojo' | 'verde' | 'gris' }>;
+  ocultarSidebar?: boolean;
   children: ReactNode;
 }
 
-export function Layout({ usuario, moduloActivo, onCambiarModulo, onCerrarSesion, menu, tituloModulo, esDashboard, bannerRed, kpis, children }: LayoutProps) {
+export function Layout({ usuario, moduloActivo, onCambiarModulo, onCerrarSesion, menu, tituloModulo, esDashboard, bannerRed, kpis, ocultarSidebar, children }: LayoutProps) {
   return (
     <div className="layout-shell">
-      <aside className="sidebar-premium">
+      {!ocultarSidebar && <aside className="sidebar-premium">
         <div className="brand-box">
           <img className="brand-image" src="/logo-repuestos-calcano.svg" alt="Logo Repuestos Calcaño" />
           <div>
@@ -54,7 +55,7 @@ export function Layout({ usuario, moduloActivo, onCambiarModulo, onCerrarSesion,
             ⏻ Salir
           </button>
         </div>
-      </aside>
+      </aside>}
 
       <main className="main-shell">
         {bannerRed && (

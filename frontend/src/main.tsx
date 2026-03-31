@@ -16,7 +16,7 @@ function rutaDesdeModulo(modulo: string, rol: string) {
   return '/';
 }
 
-type Usuario = { id: string; username: string; nombre: string; rol: string; sucursal_id?: string | null };
+type Usuario = { id: string; username: string; nombre: string; rol: string; sucursal_id?: string | null; capacidades?: string[]; puede_agregar_fidelidad?: boolean };
 type Cliente = any;
 type Producto = any;
 type Sucursal = any;
@@ -32,6 +32,8 @@ const menuPorRol: Record<string, MenuItem[]> = {
   cajero: [
     { key: 'pos', label: 'POS / Caja', icono: '🧾', acento: 'violeta' },
     { key: 'caja', label: 'Facturas y Cobros', icono: '💳', acento: 'celeste' },
+    { key: 'ordenes', label: 'Órdenes / Pedidos', icono: '📦', acento: 'celeste' },
+    { key: 'pendiente-verificar', label: 'Pendiente verificar', icono: '✅', acento: 'verde' },
     { key: 'historial-ventas', label: 'Historial de Ventas', icono: '🗂️', acento: 'gris' },
     { key: 'fidelidad', label: 'Fidelidad', icono: '⭐', acento: 'amarillo' },
   ],
@@ -183,6 +185,15 @@ function App() {
   const [rncEstado, setRncEstado] = useState<'idle'|'consultando'|'actualizando'|'encontrado'|'no_encontrado'>('idle');
   const [rncMensaje, setRncMensaje] = useState('');
   const [dgiiPanel, setDgiiPanel] = useState<any>(null);
+  const [ordenes, setOrdenes] = useState<any[]>([]);
+  const [pickers, setPickers] = useState<any[]>([]);
+  const [revClienteId, setRevClienteId] = useState('');
+  const [revClienteBuscar, setRevClienteBuscar] = useState('');
+  const [revPagoRegistrado, setRevPagoRegistrado] = useState(false);
+  const [revCarrito, setRevCarrito] = useState<any[]>([]);
+  const [ordenSeleccionada, setOrdenSeleccionada] = useState<any>(null);
+  const [pickerItems, setPickerItems] = useState<any[]>([]);
+  const [bundleActual, setBundleActual] = useState<any>(null);
   const [productoInfoCard, setProductoInfoCard] = useState<any>(null);
   const [editandoProducto, setEditandoProducto] = useState<any>(null);
   const [modalProductoInv, setModalProductoInv] = useState(false);
@@ -288,6 +299,12 @@ function App() {
       api<any[]>('/notas-credito', token).catch(() => []),
     ]);
     setPendientes(pen); setCxc(cx); setKpis(kp); setHistorialVentas(historial); setAdminResumen(adminRes); setClientesFidelidad(cf); setNotasCredito(ncs);
+    const [ords, pks] = await Promise.all([
+      api<any[]>('/orders', token).catch(() => []),
+      (usuario.rol === 'cajero' || usuario.rol === 'administrador') ? api<any[]>('/usuarios/pickers', token).catch(() => []) : Promise.resolve([]),
+    ]);
+    setOrdenes(ords);
+    setPickers(pks);
     if (usuario.rol === 'administrador') {
       const [cm, us, rs, ij, im, cua, va] = await Promise.all([api<any[]>('/compras', token).catch(() => []), api<any[]>('/usuarios', token).catch(() => []), api<any[]>('/usuarios/roles', token).catch(() => []), api<any[]>('/importador/jobs', token).catch(() => []), api<any>('/importador/meta', token).catch(() => null), api<any[]>('/cuadres', token).catch(() => []), api<any[]>('/ventas', token).catch(() => [])]);
       setCompras(cm); setUsuarios(us); setRoles(rs); setImportJobs(ij); setImportMeta(im); setCuadres(cua); setVentasAll(va);
@@ -305,6 +322,42 @@ function App() {
     ws.onmessage = () => { cargarTodo(); };
     return () => ws.close();
   }, [token]);
+
+  const tieneCapacidad = (codigo: string) => Boolean(usuario?.capacidades?.includes(codigo));
+
+  const productosRevendedor = useMemo(() => {
+    const q = buscarProducto.toLowerCase().trim();
+    if (!q) return productos.slice(0, 120);
+    return productos.filter((p) => `${p.codigo} ${p.nombre} ${p.marca ?? ''}`.toLowerCase().includes(q)).slice(0, 120);
+  }, [buscarProducto, productos]);
+
+  const clientesRev = useMemo(() => {
+    const q = revClienteBuscar.toLowerCase().trim();
+    if (!q) return clientes.slice(0, 50);
+    return clientes.filter((c) => `${c.codigo} ${c.nombre} ${c.telefono_1 ?? ''}`.toLowerCase().includes(q)).slice(0, 50);
+  }, [revClienteBuscar, clientes]);
+
+  async function crearOrdenRevendedor() {
+    if (!revClienteId) return toast('error', 'Selecciona un cliente');
+    if (!revCarrito.length) return toast('error', 'Agrega productos al pedido');
+    await api('/orders', token, {
+      method: 'POST',
+      body: JSON.stringify({
+        cliente_id: revClienteId,
+        pago_registrado: revPagoRegistrado,
+        items: revCarrito.map((i: any) => ({ producto_id: i.producto_id, cantidad: i.cantidad, precio_unitario: i.precio_unitario })),
+      }),
+    });
+    toast('ok', 'Pedido creado y enviado a Órdenes');
+    setRevCarrito([]);
+    setRevPagoRegistrado(false);
+    await cargarTodo();
+  }
+
+  async function cargarPickerView(orderId: string) {
+    const items = await api<any[]>(`/orders/${orderId}/picker-view`, token).catch(() => []);
+    setPickerItems(items);
+  }
 
   useEffect(() => {
     if (buscarClienteFidelidad.length > 2 && !clienteFidelidadSeleccionado && !creaClienteFidelidadNuevo && modalFidelidad) {
@@ -377,8 +430,13 @@ function App() {
     if (rnc.length < 9) return;
 
     const t = setTimeout(async () => {
+      const loadingHint = setTimeout(() => {
+        setRncEstado('actualizando');
+        setRncMensaje('Actualizando catálogo DGII para validar este RNC...');
+      }, 900);
       try {
         const r = await api<any>(`/dgii/rnc/${rnc}`, token);
+        clearTimeout(loadingHint);
         if (r.found) {
           const nombre = r.data.razonSocial || r.data.nombreComercial || '';
           setFiscalEmpresa(nombre);
@@ -386,10 +444,11 @@ function App() {
           setRncMensaje(`Empresa: ${nombre || '-'} · RNC: ${r.data.rnc || rnc}`);
         } else {
           setFiscalEmpresa('');
-          setRncEstado(r.message?.includes('intentó actualizar') ? 'actualizando' : 'no_encontrado');
+          setRncEstado('no_encontrado');
           setRncMensaje(r.message || 'El RNC ingresado es incorrecto o no existe en el catálogo actual.');
         }
       } catch {
+        clearTimeout(loadingHint);
         setFiscalEmpresa('');
         setRncEstado('no_encontrado');
         setRncMensaje('No se pudo validar el RNC en este momento.');
@@ -951,7 +1010,7 @@ function App() {
     localStorage.setItem('pos_token', t);
     localStorage.setItem('pos_usuario', JSON.stringify(u));
     const modRuta = moduloDesdeRuta(window.location.pathname);
-    const modInicial = u.rol === 'administrador' ? (modRuta ?? 'admin-dashboard') : 'pos';
+    const modInicial = u.rol === 'administrador' ? (modRuta ?? 'admin-dashboard') : (u.rol === 'revendedor' ? 'revendedor' : 'pos');
     setModulo(modInicial);
     localStorage.setItem('pos_modulo', modInicial);
     setVendedorId(u.id);
@@ -965,7 +1024,11 @@ function App() {
     window.history.pushState({}, '', ruta);
   }
 
-  const menu = menuPorRol[usuario.rol] ?? [];
+  const menuBase = menuPorRol[usuario.rol] ?? [];
+  const menu = [...menuBase];
+  if ((usuario.rol === 'vendedor' || usuario.rol === 'administrador') && tieneCapacidad('can_verify') && !menu.some((m) => m.key === 'pendiente-verificar')) {
+    menu.push({ key: 'pendiente-verificar', label: 'Pendiente verificar', icono: '✅', acento: 'verde' });
+  }
   const kpiCards = [{ titulo: 'Pendientes', valor: String(kpis.ventas_pendientes ?? 0), subtitulo: 'Ventas en cola', tono: 'azul' as const }, { titulo: 'Caja esperada', valor: `RD$ ${Number(kpis.caja_esperada ?? 0).toFixed(2)}`, subtitulo: 'Efectivo proyectado', tono: 'verde' as const }, { titulo: 'Crédito', valor: `RD$ ${Number(kpis.ventas_credito ?? 0).toFixed(2)}`, subtitulo: 'Ventas crédito', tono: 'rojo' as const }, { titulo: 'Cobros', valor: `${Number(kpis.cobros_cantidad ?? 0)}`, subtitulo: `RD$ ${Number(kpis.cobros_total ?? 0).toFixed(2)}`, tono: 'gris' as const }, { titulo: 'Beneficio', valor: `RD$ ${Number(kpis.beneficio_neto ?? 0).toFixed(2)}`, subtitulo: 'Ganancia neta', tono: 'azul' as const }];
 
   const imgSrc = (url: string) => url ? (url.startsWith('http') ? url : url) : '';
@@ -1026,7 +1089,7 @@ function App() {
   );
 
   return <>
-    <Layout usuario={usuario} moduloActivo={modulo} onCambiarModulo={cambiarModuloConRuta} onCerrarSesion={cerrarSesion} menu={menu} tituloModulo={menu.find((m) => m.key === modulo)?.label ?? 'POS'} esDashboard={modulo === 'admin-dashboard'} kpis={modulo === 'admin-dashboard' && usuario.rol === 'administrador' ? kpiCards : []}>
+    <Layout usuario={usuario} moduloActivo={modulo} onCambiarModulo={cambiarModuloConRuta} onCerrarSesion={cerrarSesion} menu={menu} tituloModulo={menu.find((m) => m.key === modulo)?.label ?? 'POS'} esDashboard={modulo === 'admin-dashboard'} kpis={modulo === 'admin-dashboard' && usuario.rol === 'administrador' ? kpiCards : []} ocultarSidebar={usuario.rol === 'revendedor'}>
 
       {modulo === 'pos' && <div className="panel-grid">
         <article className="panel-card span-8">
@@ -1108,9 +1171,13 @@ function App() {
                   <label>RNC</label>
                   <input value={fiscalRnc} onChange={(e) => setFiscalRnc(e.target.value)} placeholder="RNC" />
                 </div>
+                <div>
+                  <label>Empresa (autocompletado)</label>
+                  <input value={fiscalEmpresa} readOnly placeholder="Se completa automáticamente con DGII" />
+                </div>
                 <div style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 700 }}>
                   {rncEstado === 'consultando' && rncMensaje}
-                  {rncEstado === 'actualizando' && 'Actualizando catálogo DGII para validar este RNC...'}
+                  {rncEstado === 'actualizando' && (rncMensaje || 'Actualizando catálogo DGII para validar este RNC...')}
                   {rncEstado === 'encontrado' && `✅ ${rncMensaje}`}
                   {rncEstado === 'no_encontrado' && `⚠️ ${rncMensaje}`}
                 </div>
@@ -1905,6 +1972,171 @@ function App() {
         </article>
       )}
 
+      {modulo === 'revendedor' && usuario.rol === 'revendedor' && (
+        <article className="panel-card">
+          <div className="panel-head">
+            <h3>Catálogo Revendedor (Tablet)</h3>
+            <span className="chip chip-soft">Pedido en calle</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 }}>
+            <div>
+              <label>Buscar cliente</label>
+              <input value={revClienteBuscar} onChange={(e) => setRevClienteBuscar(e.target.value)} placeholder="Código, nombre o teléfono" />
+              <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, marginTop: 8 }}>
+                {clientesRev.map((c) => (
+                  <button key={c.id} className="btn btn-ghost" style={{ width: '100%', textAlign: 'left', borderRadius: 0 }} onClick={() => setRevClienteId(c.id)}>
+                    {c.codigo} · {c.nombre}
+                  </button>
+                ))}
+              </div>
+              <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={() => { setNuevoCliente({ ...NUEVOCLUB_BLANK, codigo: autoCodigoCliente(clientes), nombre: revClienteBuscar || '' }); setModalCliente(true); }}>+ Crear cliente nuevo</button>
+            </div>
+            <div>
+              <label>Pago recibido en calle</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                <input type="checkbox" checked={revPagoRegistrado} onChange={(e) => setRevPagoRegistrado(e.target.checked)} />
+                <span>Marcar como pagado</span>
+              </div>
+              <div style={{ marginTop: 12, fontSize: 13, color: '#475569' }}>Cliente seleccionado: <strong>{clientes.find((c) => c.id === revClienteId)?.nombre || '—'}</strong></div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <label>Buscar productos</label>
+            <input value={buscarProducto} onChange={(e) => setBuscarProducto(e.target.value)} placeholder="Código / nombre / marca" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 10, marginTop: 10 }}>
+              {productosRevendedor.map((p: any) => (
+                <button key={p.id} className="btn btn-ghost" style={{ textAlign: 'left', padding: 10 }} onClick={() => setRevCarrito((prev) => {
+                  const ex = prev.find((x: any) => x.producto_id === p.id);
+                  if (ex) return prev.map((x: any) => x.producto_id === p.id ? { ...x, cantidad: x.cantidad + 1 } : x);
+                  return [...prev, { producto_id: p.id, descripcion: p.nombre, cantidad: 1, precio_unitario: Number(p.precio || 0) }];
+                })}>
+                  <strong>{p.nombre}</strong>
+                  <div style={{ fontSize: 12, color: '#475569' }}>{p.marca || '-'} · RD$ {Number(p.precio || 0).toFixed(2)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <h4 style={{ marginTop: 14 }}>Resumen del pedido</h4>
+          <table className="table-premium">
+            <thead><tr><th>Producto</th><th>Cant</th><th>Precio</th><th>Total</th></tr></thead>
+            <tbody>
+              {revCarrito.length === 0 ? <tr><td colSpan={4} style={{ textAlign: 'center' }}>Sin productos</td></tr> : revCarrito.map((i: any, idx: number) => (
+                <tr key={idx}>
+                  <td>{i.descripcion}</td>
+                  <td><input type="number" min={1} value={i.cantidad} onChange={(e) => setRevCarrito((prev) => prev.map((x, j) => j === idx ? { ...x, cantidad: Math.max(1, Number(e.target.value || 1)) } : x))} /></td>
+                  <td>RD$ {Number(i.precio_unitario).toFixed(2)}</td>
+                  <td>RD$ {(Number(i.cantidad) * Number(i.precio_unitario)).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+            <strong>Total: RD$ {revCarrito.reduce((a, i) => a + Number(i.cantidad) * Number(i.precio_unitario), 0).toFixed(2)}</strong>
+            <button className="btn btn-primary" onClick={() => crearOrdenRevendedor().catch((e) => toast('error', e.message))}>Enviar pedido a Órdenes</button>
+          </div>
+        </article>
+      )}
+
+      {modulo === 'ordenes' && (
+        <article className="panel-card">
+          <div className="panel-head"><h3>Órdenes / Pedidos</h3><span className="chip chip-soft">{ordenes.length} órdenes</span></div>
+          <table className="table-premium">
+            <thead><tr><th>Orden</th><th>Cliente</th><th>Estado</th><th>Creada por</th><th>Picker</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {ordenes.length === 0 ? <tr><td colSpan={6} style={{ textAlign: 'center' }}>Sin órdenes</td></tr> : ordenes.map((o: any) => (
+                <tr key={o.id}>
+                  <td>{o.numero_orden}</td><td>{o.cliente_nombre}</td><td>{o.estado}</td><td>{o.usuario_creador}</td><td>{o.picker_asignado || '-'}</td>
+                  <td style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost" onClick={async () => { setOrdenSeleccionada(o); await cargarPickerView(o.id); }}>Ver detalle</button>
+                    {(usuario.rol === 'cajero' || usuario.rol === 'administrador') && (
+                      <select defaultValue="" onChange={(e) => {
+                        if (!e.target.value) return;
+                        api(`/orders/${o.id}/asignar-picker`, token, { method: 'POST', body: JSON.stringify({ picker_usuario_id: e.target.value }) })
+                          .then(() => { toast('ok', 'Buscador asignado'); cargarTodo(); })
+                          .catch((er: any) => toast('error', er.message));
+                      }}>
+                        <option value="">Asignar buscador...</option>
+                        {pickers.map((p: any) => <option key={p.id} value={p.id}>{p.nombre_completo}</option>)}
+                      </select>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {ordenSeleccionada && (
+            <div style={{ marginTop: 14 }}>
+              <h4>Checklist de búsqueda · {ordenSeleccionada.numero_orden}</h4>
+              <table className="table-premium">
+                <thead><tr><th>Producto</th><th>Marca</th><th>Cantidad</th><th>Ubicación</th><th>Encontrado</th></tr></thead>
+                <tbody>
+                  {pickerItems.map((it: any) => (
+                    <tr key={it.id}>
+                      <td>{it.descripcion}</td><td>{it.marca || '-'}</td><td>{it.cantidad}</td><td>{it.ubicacion || '-'}</td>
+                      <td><input type="checkbox" checked={!!it.encontrado} onChange={async (e) => {
+                        if (!e.target.checked) return;
+                        await api(`/orders/${ordenSeleccionada.id}/items/${it.id}/found`, token, { method: 'POST' });
+                        await cargarPickerView(ordenSeleccionada.id);
+                        await cargarTodo();
+                      }} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </article>
+      )}
+
+      {modulo === 'pendiente-verificar' && (usuario.rol === 'cajero' || tieneCapacidad('can_verify')) && (
+        <article className="panel-card">
+          <div className="panel-head"><h3>Pendiente verificar</h3><span className="chip chip-warning">{ordenes.filter((o: any) => ['buscada','pendiente_verificacion','en_verificacion','empacando'].includes(String(o.estado))).length}</span></div>
+          {ordenes.filter((o: any) => ['buscada','pendiente_verificacion','en_verificacion','empacando'].includes(String(o.estado))).map((o: any) => (
+            <div key={o.id} style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 10, marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <strong>{o.numero_orden} · {o.cliente_nombre}</strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost" onClick={async () => { await api(`/orders/${o.id}/verificar/iniciar`, token, { method: 'POST' }); toast('ok', 'Verificación iniciada'); cargarTodo(); }}>Iniciar verificación</button>
+                  <button className="btn btn-primary" onClick={async () => { const b = await api<any>(`/orders/${o.id}/bundles`, token, { method: 'POST' }); setBundleActual({ orderId: o.id, ...b }); toast('ok', `Bulto #${b.numero_bulto} abierto`); }}>Nuevo bulto</button>
+                </div>
+              </div>
+              <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={async () => { setOrdenSeleccionada(o); await cargarPickerView(o.id); }}>Ver items</button>
+            </div>
+          ))}
+          {ordenSeleccionada && (
+            <div>
+              <h4>Verificando {ordenSeleccionada.numero_orden} · {bundleActual ? `Bulto #${bundleActual.numero_bulto}` : 'Seleccione/cree bulto'}</h4>
+              <table className="table-premium">
+                <thead><tr><th>Producto</th><th>Esperado</th><th>Verificado</th><th>Acción</th></tr></thead>
+                <tbody>
+                  {pickerItems.map((it: any) => (
+                    <tr key={it.id}>
+                      <td>{it.descripcion}</td>
+                      <td>{it.cantidad}</td>
+                      <td><input id={`verif-${it.id}`} type="number" min={0} defaultValue={Number(it.cantidad_verificada || it.cantidad || 0)} /></td>
+                      <td><button className="btn btn-primary" disabled={!bundleActual} onClick={async () => {
+                        const el = document.getElementById(`verif-${it.id}`) as HTMLInputElement | null;
+                        const qty = Math.max(0, Number(el?.value || 0));
+                        await api(`/orders/${ordenSeleccionada.id}/verificaciones`, token, { method: 'POST', body: JSON.stringify({ order_item_id: it.id, bundle_id: bundleActual?.id, cantidad_verificada: qty }) });
+                        await cargarPickerView(ordenSeleccionada.id);
+                        await cargarTodo();
+                      }}>Confirmar</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {bundleActual && (
+                <button className="btn btn-primary" onClick={async () => {
+                  const r = await api<any>(`/orders/${ordenSeleccionada.id}/bundles/${bundleActual.id}/cerrar`, token, { method: 'POST' });
+                  toast('ok', `Etiqueta lista para Bulto ${r?.etiqueta?.bulto ?? ''}`);
+                  await cargarTodo();
+                }}>Caja llena / cerrar bulto</button>
+              )}
+            </div>
+          )}
+        </article>
+      )}
+
 
 
       {modulo === 'dgii' && usuario.rol === 'administrador' && (
@@ -1918,6 +2150,8 @@ function App() {
             <div style={{ marginTop: 12 }}>
               <div>Última actualización exitosa: <strong>{dgiiPanel.ultimo_ok?.inicio || '-'}</strong></div>
               <div>Total registros: <strong>{dgiiPanel.total_registros ?? 0}</strong></div>
+              <div>Estado actual: <strong>{dgiiPanel.sync_en_progreso ? 'Sincronizando...' : 'En espera'}</strong></div>
+              <div>Última validación inmediata: <strong>{dgiiPanel.ultima_validacion_inmediata?.inicio || '-'}</strong></div>
               <div>Último error: <strong>{dgiiPanel.ultimo_error?.mensaje_error || '-'}</strong></div>
               <h4>Historial reciente</h4>
               <table className="table-premium"><thead><tr><th>Inicio</th><th>Estado</th><th>Tipo</th><th>Formato</th><th>Error</th></tr></thead><tbody>
@@ -2709,6 +2943,10 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderRadius: 8, padding: '10px 14px', border: '1px solid #fde68a', marginTop: 12 }}>
               <input type="checkbox" id="puede-fidelidad" checked={!!editandoUsuario.puede_agregar_fidelidad} onChange={(e) => setEditandoUsuario((s: any) => ({ ...s, puede_agregar_fidelidad: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#d97706', cursor: 'pointer' }} />
               <label htmlFor="puede-fidelidad" style={{ cursor: 'pointer', fontWeight: 600, color: '#92400e', margin: 0 }}>⭐ Puede agregar clientes al programa de Fidelidad desde el POS</label>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'linear-gradient(135deg,#ecfeff,#cffafe)', borderRadius: 8, padding: '10px 14px', border: '1px solid #67e8f9', marginTop: 8 }}>
+              <input type="checkbox" id="puede-verificar" checked={!!editandoUsuario.puede_verificar} onChange={(e) => setEditandoUsuario((s: any) => ({ ...s, puede_verificar: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#0891b2', cursor: 'pointer' }} />
+              <label htmlFor="puede-verificar" style={{ cursor: 'pointer', fontWeight: 600, color: '#155e75', margin: 0 }}>✅ Disponible como verificador de pedidos</label>
             </div>
             <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" onClick={() => actualizarUsuario().catch((e) => toast('error', e.message))}>Guardar cambios</button>

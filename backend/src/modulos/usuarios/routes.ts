@@ -19,12 +19,25 @@ usuariosRouter.get('/vendedores', permitir('vendedor', 'cajero', 'administrador'
   res.json(rows);
 });
 
+usuariosRouter.get('/pickers', permitir('cajero', 'administrador'), (_req, res) => {
+  const rows = db.prepare(`SELECT u.id, u.nombre_completo, u.username
+    FROM usuarios u JOIN roles r ON r.id=u.rol_id
+    WHERE u.estado='activo' AND r.nombre='buscador'
+    ORDER BY u.nombre_completo ASC`).all();
+  res.json(rows);
+});
+
 usuariosRouter.use(permitir('administrador'));
 
 usuariosRouter.get('/', (_req, res) => {
   const rows = db.prepare(`SELECT u.id, u.username, u.nombre_completo, u.estado, r.nombre as rol,
       (SELECT us.sucursal_id FROM usuarios_sucursales us WHERE us.usuario_id=u.id ORDER BY us.es_predeterminada DESC, us.fecha_creacion ASC LIMIT 1) as sucursal_id,
-      (SELECT GROUP_CONCAT(s.nombre, ', ') FROM usuarios_sucursales us JOIN sucursales s ON s.id=us.sucursal_id WHERE us.usuario_id=u.id) as sucursales
+      (SELECT GROUP_CONCAT(s.nombre, ', ') FROM usuarios_sucursales us JOIN sucursales s ON s.id=us.sucursal_id WHERE us.usuario_id=u.id) as sucursales,
+      EXISTS(
+        SELECT 1 FROM usuario_capacidades uc
+        JOIN capacidades c ON c.id=uc.capacidad_id
+        WHERE uc.usuario_id=u.id AND c.codigo='can_verify'
+      ) as puede_verificar
     FROM usuarios u JOIN roles r ON r.id=u.rol_id ORDER BY u.nombre_completo ASC`).all();
   res.json(rows);
 });
@@ -62,7 +75,7 @@ usuariosRouter.post('/:id/sucursales', (req, res) => {
 });
 
 usuariosRouter.put('/:id', (req, res) => {
-  const { username, nombre_completo, password, rol, sucursal_id, estado, puede_agregar_fidelidad } = req.body as any;
+  const { username, nombre_completo, password, rol, sucursal_id, estado, puede_agregar_fidelidad, puede_verificar } = req.body as any;
   const actual = db.prepare('SELECT * FROM usuarios WHERE id=?').get(req.params.id) as any;
   if (!actual) return res.status(404).json({ error: 'Usuario no encontrado' });
   const role = rol ? db.prepare('SELECT id FROM roles WHERE nombre=?').get(rol) as { id: string } | undefined : undefined;
@@ -91,6 +104,18 @@ usuariosRouter.put('/:id', (req, res) => {
         if (sucursal_id) {
           db.prepare('INSERT INTO usuarios_sucursales(id,usuario_id,sucursal_id,es_predeterminada,fecha_creacion) VALUES(?,?,?,?,?)')
             .run(uuid(), req.params.id, sucursal_id, 1, now);
+        }
+      }
+
+      if (puede_verificar !== undefined) {
+        const cap = db.prepare("SELECT id FROM capacidades WHERE codigo='can_verify'").get() as any;
+        if (cap?.id) {
+          if (puede_verificar) {
+            db.prepare('INSERT OR IGNORE INTO usuario_capacidades(id,usuario_id,capacidad_id,fecha_creacion) VALUES(?,?,?,?)')
+              .run(uuid(), req.params.id, cap.id, now);
+          } else {
+            db.prepare('DELETE FROM usuario_capacidades WHERE usuario_id=? AND capacidad_id=?').run(req.params.id, cap.id);
+          }
         }
       }
     });
