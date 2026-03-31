@@ -75,6 +75,20 @@ export function Layout({ usuario, moduloActivo, onCambiarModulo, onCerrarSesion,
           </div>
         </header>
 
+        {ocultarSidebar && menu.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, margin: '0 0 12px 0', flexWrap: 'wrap' }}>
+            {menu.map((item) => (
+              <button
+                key={item.key}
+                className={`btn ${moduloActivo === item.key ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => onCambiarModulo(item.key)}
+              >
+                {item.icono} {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {esDashboard && kpis.length > 0 && (
           <section className="kpi-grid">
             {kpis.map((kpi) => (

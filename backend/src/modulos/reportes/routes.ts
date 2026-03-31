@@ -61,6 +61,39 @@ reportesRouter.get('/ventas-por-sucursal', (_req, res) => {
     GROUP BY s.id ORDER BY monto DESC`).all();
   res.json(rows);
 });
+
+reportesRouter.get('/eficiencia-vendedores', (_req, res) => {
+  const rows = db.prepare(`SELECT
+      u.id as vendedor_id,
+      u.nombre_completo as vendedor,
+      r.nombre as rol,
+      COALESCE(vs.cantidad_ventas, 0) as cantidad_ventas,
+      COALESCE(vs.total_vendido, 0) as total_vendido,
+      CASE WHEN COALESCE(vs.cantidad_ventas, 0) > 0 THEN ROUND(vs.total_vendido / vs.cantidad_ventas, 2) ELSE 0 END as ticket_promedio,
+      COALESCE(os.ordenes_creadas, 0) as ordenes_creadas,
+      COALESCE(os.ordenes_completadas, 0) as ordenes_completadas,
+      CASE WHEN COALESCE(os.ordenes_creadas, 0) > 0
+        THEN ROUND((CAST(os.ordenes_completadas AS REAL) / os.ordenes_creadas) * 100, 2)
+        ELSE 0 END as eficiencia_ordenes_pct
+    FROM usuarios u
+    JOIN roles r ON r.id=u.rol_id
+    LEFT JOIN (
+      SELECT vendedor_id, COUNT(*) as cantidad_ventas, COALESCE(SUM(total),0) as total_vendido
+      FROM ventas
+      WHERE estado<>'anulada'
+      GROUP BY vendedor_id
+    ) vs ON vs.vendedor_id=u.id
+    LEFT JOIN (
+      SELECT usuario_creador_id,
+        COUNT(*) as ordenes_creadas,
+        SUM(CASE WHEN estado IN ('empacando','completada') THEN 1 ELSE 0 END) as ordenes_completadas
+      FROM orders
+      GROUP BY usuario_creador_id
+    ) os ON os.usuario_creador_id=u.id
+    WHERE u.estado='activo' AND r.nombre IN ('vendedor', 'revendedor')
+    ORDER BY total_vendido DESC, eficiencia_ordenes_pct DESC, vendedor ASC`).all();
+  res.json(rows);
+});
 reportesRouter.get('/cxc', (_req, res) => {
   const rows = db.prepare(`SELECT
       c.id as cxc_ref,

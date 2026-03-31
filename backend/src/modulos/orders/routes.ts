@@ -20,7 +20,9 @@ ordersRouter.get('/', permitir('cajero', 'administrador', 'revendedor', 'buscado
 
   const rows = usuario.rol === 'buscador'
     ? db.prepare(base + ` WHERE EXISTS (SELECT 1 FROM order_assignments oa WHERE oa.order_id=o.id AND oa.picker_usuario_id=?) ORDER BY o.fecha_creacion DESC`).all(usuario.id)
-    : db.prepare(base + ' ORDER BY o.fecha_creacion DESC').all();
+    : usuario.rol === 'revendedor'
+      ? db.prepare(base + ' WHERE o.usuario_creador_id=? ORDER BY o.fecha_creacion DESC').all(usuario.id)
+      : db.prepare(base + ' ORDER BY o.fecha_creacion DESC').all();
 
   res.json(rows);
 });

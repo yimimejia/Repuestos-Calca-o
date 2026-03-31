@@ -121,6 +121,7 @@ const REPORTE_LABELS: Record<string, string> = {
   'compras-por-suplidor': 'Compras por Suplidor',
   'compras-por-sucursal': 'Compras por Sucursal',
   'ventas-por-sucursal': 'Ventas por Sucursal',
+  'eficiencia-vendedores': 'Eficiencia por Vendedor',
   'cxc': 'Cuentas por Cobrar',
   'existencia-minima': 'Existencia Mínima',
   'base-606': 'Base 606',
@@ -129,6 +130,7 @@ const REPORTE_LABELS: Record<string, string> = {
 const REPORTE_ICONS: Record<string, string> = {
   'clientes': '👥', 'suplidores': '🏭', 'productos': '🔩', 'inventario-sucursal': '🏪',
   'compras-por-suplidor': '🧮', 'compras-por-sucursal': '🧮', 'ventas-por-sucursal': '📈',
+  'eficiencia-vendedores': '🏁',
   'cxc': '📒', 'existencia-minima': '⚠️', 'base-606': '🗂️',
 };
 
@@ -308,7 +310,7 @@ function App() {
     if (usuario.rol === 'administrador') {
       const [cm, us, rs, ij, im, cua, va] = await Promise.all([api<any[]>('/compras', token).catch(() => []), api<any[]>('/usuarios', token).catch(() => []), api<any[]>('/usuarios/roles', token).catch(() => []), api<any[]>('/importador/jobs', token).catch(() => []), api<any>('/importador/meta', token).catch(() => null), api<any[]>('/cuadres', token).catch(() => []), api<any[]>('/ventas', token).catch(() => [])]);
       setCompras(cm); setUsuarios(us); setRoles(rs); setImportJobs(ij); setImportMeta(im); setCuadres(cua); setVentasAll(va);
-      const keys = ['clientes', 'suplidores', 'productos', 'inventario-sucursal', 'compras-por-suplidor', 'compras-por-sucursal', 'ventas-por-sucursal', 'cxc', 'existencia-minima', 'base-606'];
+      const keys = ['clientes', 'suplidores', 'productos', 'inventario-sucursal', 'compras-por-suplidor', 'compras-por-sucursal', 'ventas-por-sucursal', 'eficiencia-vendedores', 'cxc', 'existencia-minima', 'base-606'];
       const out: Record<string, any[]> = {};
       await Promise.all(keys.map(async (k) => { out[k] = await api<any[]>(`/reportes/${k}`, token).catch(() => []); }));
       setReportes(out);
