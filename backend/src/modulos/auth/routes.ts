@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../../db/connection.js';
-import { firmarToken } from '../../shared/auth.js';
+import { capacidadesDeUsuario, firmarToken } from '../../shared/auth.js';
 import { hashPassword, verifyPassword } from '../../shared/security.js';
 
 export const authRouter = Router();
@@ -21,6 +21,7 @@ authRouter.post('/login', (req, res) => {
   const sucursalRow = db.prepare('SELECT sucursal_id FROM usuarios_sucursales WHERE usuario_id=? AND es_predeterminada=1 LIMIT 1').get(user.id) as any;
   const sucursal_id = sucursalRow?.sucursal_id ?? null;
 
-  const token = firmarToken({ id: user.id, username: user.username, nombre: user.nombre_completo, rol: user.rol, sucursal_id });
-  return res.json({ token, usuario: { id: user.id, username: user.username, nombre: user.nombre_completo, rol: user.rol, sucursal_id } });
+  const capacidades = capacidadesDeUsuario(user.id);
+  const token = firmarToken({ id: user.id, username: user.username, nombre: user.nombre_completo, rol: user.rol, sucursal_id, capacidades });
+  return res.json({ token, usuario: { id: user.id, username: user.username, nombre: user.nombre_completo, rol: user.rol, sucursal_id, capacidades } });
 });

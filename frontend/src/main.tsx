@@ -28,7 +28,6 @@ type Toast = { id: number; tipo: 'ok' | 'error'; texto: string };
 const menuPorRol: Record<string, MenuItem[]> = {
   vendedor: [
     { key: 'pos', label: 'POS Vendedor', icono: '🧾', acento: 'violeta' },
-    { key: 'fidelidad', label: 'Fidelidad', icono: '⭐', acento: 'amarillo' },
   ],
   cajero: [
     { key: 'pos', label: 'POS / Caja', icono: '🧾', acento: 'violeta' },
@@ -37,6 +36,13 @@ const menuPorRol: Record<string, MenuItem[]> = {
     { key: 'fidelidad', label: 'Fidelidad', icono: '⭐', acento: 'amarillo' },
   ],
   al_por_mayor: [{ key: 'mayorista', label: 'Edición Mayorista', icono: '🏷️', acento: 'naranja' }],
+  revendedor: [
+    { key: 'revendedor', label: 'Catálogo Revendedor', icono: '🛍️', acento: 'verde' },
+    { key: 'ordenes', label: 'Órdenes', icono: '📦', acento: 'celeste' },
+  ],
+  buscador: [
+    { key: 'ordenes', label: 'Órdenes asignadas', icono: '📦', acento: 'celeste' },
+  ],
   administrador: [
     { key: 'admin-dashboard', label: 'Dashboard', icono: '📈', acento: 'azul' },
     { key: 'pos', label: 'POS Vendedor', icono: '🧾', acento: 'violeta' },
@@ -50,6 +56,8 @@ const menuPorRol: Record<string, MenuItem[]> = {
     { key: 'inventario', label: 'Inventario Sucursal', icono: '🏪', acento: 'violeta' },
     { key: 'maestros', label: 'Suc / Cat / Suplidor', icono: '🧱', acento: 'celeste' },
     { key: 'usuarios', label: 'Usuarios', icono: '🛡️', acento: 'morado' },
+    { key: 'ncf', label: 'Rangos NCF', icono: '🧾', acento: 'rojo' },
+    { key: 'dgii', label: 'Catálogo DGII', icono: '🏛️', acento: 'gris' },
     { key: 'importador', label: 'Importar SQL', icono: '🧬', acento: 'gris' },
     { key: 'reportes', label: 'Reportes', icono: '📊', acento: 'azul' },
     { key: 'contabilidad', label: 'Contabilidad', icono: '🏦', acento: 'verde' },
@@ -138,6 +146,11 @@ function App() {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [pendientes, setPendientes] = useState<any[]>([]);
   const [cxc, setCxc] = useState<any[]>([]);
+  const [ncfTipos, setNcfTipos] = useState<any[]>([]);
+  const [ncfEdit, setNcfEdit] = useState<Record<string, any>>({});
+  const [tipoComprobante, setTipoComprobante] = useState('consumidor_final');
+  const [ncfPreview, setNcfPreview] = useState('');
+  const [cajaChecklistModal, setCajaChecklistModal] = useState<any>(null);
   const [inventario, setInventario] = useState<any[]>([]);
   const [compras, setCompras] = useState<any[]>([]);
   const [reportes, setReportes] = useState<Record<string, any[]>>({});
@@ -163,7 +176,13 @@ function App() {
   const [modalUsuario, setModalUsuario] = useState(false);
   const [editandoUsuario, setEditandoUsuario] = useState<any>(null);
   const [reporteActivo, setReporteActivo] = useState('');
-  const [clienteQuery, setClienteQuery] = useState('');
+  const [clienteQuery, setClienteQuery] = useState('PORTADOR');
+  const [clienteNombreLibre, setClienteNombreLibre] = useState('PORTADOR');
+  const [fiscalRnc, setFiscalRnc] = useState('');
+  const [fiscalEmpresa, setFiscalEmpresa] = useState('');
+  const [rncEstado, setRncEstado] = useState<'idle'|'consultando'|'actualizando'|'encontrado'|'no_encontrado'>('idle');
+  const [rncMensaje, setRncMensaje] = useState('');
+  const [dgiiPanel, setDgiiPanel] = useState<any>(null);
   const [productoInfoCard, setProductoInfoCard] = useState<any>(null);
   const [editandoProducto, setEditandoProducto] = useState<any>(null);
   const [modalProductoInv, setModalProductoInv] = useState(false);
@@ -210,6 +229,8 @@ function App() {
   const [cajaCobrarModal, setCajaCobrarModal] = useState<any>(null);
   const [cajaTipoPago, setCajaTipoPago] = useState('efectivo');
   const [cajaMontoRecibido, setCajaMontoRecibido] = useState('');
+  const [cajaMixtoEfectivo, setCajaMixtoEfectivo] = useState('');
+  const [cajaMixtoOtroTipo, setCajaMixtoOtroTipo] = useState('tarjeta');
 
   const NUEVOCLUB_BLANK = { codigo: '', nombre: '', cedula_rnc: '', representante: '', direccion: '', correo: '', fecha_nacimiento: '', telefono_1: '', telefono_2: '', limite_credito: 0, limite_tiempo_dias: 30, tipo_cliente: '', estatus_credito: 'cerrado', porcentaje_descuento: 0, tipo_comprobante_fiscal: 'consumidor_final', en_programa_fidelidad: false };
   const [nuevoCliente, setNuevoCliente] = useState<any>(NUEVOCLUB_BLANK);
@@ -309,6 +330,74 @@ function App() {
     }
   }, [buscarClienteFidelidad, clienteFidelidadSeleccionado, creaClienteFidelidadNuevo, modalFidelidad, clientes]);
 
+
+  useEffect(() => {
+    const portador = clientes.find((c) => String(c.nombre || '').toUpperCase() === 'PORTADOR' || String(c.codigo || '').toUpperCase() === 'CLI-0002');
+    if (!clienteId && portador) setClienteId(portador.id);
+    if (!clienteQuery) setClienteQuery('PORTADOR');
+    if (!clienteNombreLibre) setClienteNombreLibre('PORTADOR');
+  }, [clientes, clienteId, clienteQuery, clienteNombreLibre]);
+
+  useEffect(() => {
+    if (!token) return;
+    api<any[]>(`/ncf/types`, token).then(setNcfTipos).catch(() => setNcfTipos([]));
+  }, [token]);
+
+
+  useEffect(() => {
+    const map: Record<string, any> = {};
+    for (const t of ncfTipos) {
+      map[t.id] = {
+        nombre: t.nombre,
+        prefijo_fiscal: t.prefijo_fiscal,
+        secuencia_inicial: Number(t.secuencia_inicial ?? 1),
+        secuencia_actual: Number(t.secuencia_actual ?? 1),
+        secuencia_final: Number(t.secuencia_final ?? 99999999),
+        activo: Number(t.activo ?? 1),
+        observaciones: t.observaciones ?? '',
+      };
+    }
+    setNcfEdit(map);
+  }, [ncfTipos]);
+
+  useEffect(() => {
+    if (!token || !tipoComprobante) return;
+    api<any>(`/ventas/preview-ncf/${tipoComprobante}`, token).then((r) => setNcfPreview(r.ncf || '')).catch(() => setNcfPreview(''));
+  }, [token, tipoComprobante]);
+
+
+  useEffect(() => {
+    if (!token || tipoComprobante === 'consumidor_final') return;
+    const rnc = fiscalRnc.replace(/\D/g, '');
+    if (!rnc.length) { setRncEstado('idle'); setRncMensaje(''); setFiscalEmpresa(''); return; }
+
+    setRncEstado('consultando');
+    setRncMensaje(rnc.length < 9 ? `Buscando RNC... (${rnc.length}/9)` : 'Buscando RNC en catálogo DGII...');
+
+    if (rnc.length < 9) return;
+
+    const t = setTimeout(async () => {
+      try {
+        const r = await api<any>(`/dgii/rnc/${rnc}`, token);
+        if (r.found) {
+          const nombre = r.data.razonSocial || r.data.nombreComercial || '';
+          setFiscalEmpresa(nombre);
+          setRncEstado('encontrado');
+          setRncMensaje(`Empresa: ${nombre || '-'} · RNC: ${r.data.rnc || rnc}`);
+        } else {
+          setFiscalEmpresa('');
+          setRncEstado(r.message?.includes('intentó actualizar') ? 'actualizando' : 'no_encontrado');
+          setRncMensaje(r.message || 'El RNC ingresado es incorrecto o no existe en el catálogo actual.');
+        }
+      } catch {
+        setFiscalEmpresa('');
+        setRncEstado('no_encontrado');
+        setRncMensaje('No se pudo validar el RNC en este momento.');
+      }
+    }, 450);
+    return () => clearTimeout(t);
+  }, [token, tipoComprobante, fiscalRnc]);
+
   useEffect(() => {
     if (tipoVenta === 'devolucion' && !modalDevolucion) {
       setModalDevolucion(true);
@@ -350,11 +439,11 @@ function App() {
 
   const clienteSel = clientes.find((c) => c.id === clienteId);
   const subtotal = carrito.reduce((a, i) => a + Number(i.cantidad) * Number(i.precio_unitario), 0);
-  const itbisTotal = carrito.reduce((a, i) => a + (Number(i.cantidad) * Number(i.precio_unitario) - Number(i.descuento_monto ?? 0)) * Number(i.itbis_tasa ?? 0), 0);
   const descuentoItems = carrito.reduce((a, i) => a + Number(i.descuento_monto ?? 0), 0);
-  const descuentoGlobalMonto = descuentoGlobal > 0 ? (subtotal + itbisTotal - descuentoItems) * (descuentoGlobal / 100) : 0;
+  const descuentoGlobalMonto = descuentoGlobal > 0 ? (subtotal - descuentoItems) * (descuentoGlobal / 100) : 0;
   const descuentoTotal = descuentoItems + descuentoGlobalMonto;
-  const total = subtotal + itbisTotal - descuentoTotal;
+  const total = subtotal - descuentoTotal;
+  const itbisTotal = carrito.reduce((a, i) => { const base = Number(i.cantidad) * Number(i.precio_unitario) - Number(i.descuento_monto ?? 0); const tasa = Number(i.itbis_tasa ?? 0.18); return a + (base - base / (1 + tasa)); }, 0);
 
   function aplicarDescuentoGlobal(pct: number) {
     setDescuentoGlobal((prev) => prev === pct ? 0 : pct);
@@ -411,6 +500,24 @@ function App() {
 
   async function crearCompra() { await api('/compras', token, { method: 'POST', body: JSON.stringify(nuevaCompra) }); toast('ok', 'Compra registrada'); setNuevaCompra({ suplidor_id: '', sucursal_id: sucursalId, numero_factura: '', numero_ncf: '', fecha_factura: '', fecha_vencimiento: '', condicion_compra: 'contado', estado_pago: 'pendiente', observaciones: '', items: [] }); await cargarTodo(); }
   async function crearUsuario() { await api('/usuarios', token, { method: 'POST', body: JSON.stringify(nuevoUsuario) }); toast('ok', 'Usuario creado'); await cargarTodo(); }
+
+  async function guardarRangoNcf(ncfTypeId: string) {
+    const data = ncfEdit[ncfTypeId];
+    if (!data) return;
+    const desde = Number(data.secuencia_inicial);
+    const hasta = Number(data.secuencia_final);
+    const actual = Number(data.secuencia_actual ?? data.secuencia_inicial);
+    if (desde <= 0 || hasta < desde) {
+      toast('error', 'Rango NCF inválido: verifica Desde/Hasta');
+      return;
+    }
+    const payload = { ...data, secuencia_actual: Math.max(desde, actual) };
+    await api(`/ncf/types/${ncfTypeId}`, token, { method: 'PUT', body: JSON.stringify(payload) });
+    toast('ok', 'Rango NCF actualizado');
+    const tipos = await api<any[]>('/ncf/types', token);
+    setNcfTipos(tipos);
+  }
+
   async function actualizarUsuario() {
     if (!editandoUsuario) return;
     await api(`/usuarios/${editandoUsuario.id}`, token, { method: 'PUT', body: JSON.stringify(editandoUsuario) });
@@ -602,8 +709,98 @@ function App() {
     win.print();
   }
 
+
+
+  async function esperarRecursosImpresion(win: Window) {
+    const imgs = Array.from(win.document.images ?? []);
+    await Promise.all(imgs.map((img) => new Promise<void>((resolve) => {
+      if (img.complete) return resolve();
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    })));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  async function imprimirFacturaVenta(ventaId: string, metodoPago: string, pagoCliente: number, devuelta: number, preopened?: Window | null) {
+    const data = await api<any>(`/ventas/${ventaId}`, token);
+    const venta = data.venta;
+    const detalle = data.detalle ?? [];
+    const clienteNombre = venta?.cliente_nombre || clienteNombreLibre || 'PORTADOR';
+    const clienteRnc = venta?.cliente_documento || venta?.cliente_cedula_rnc || '';
+    const fechaImp = new Date();
+    const fechaVal = new Date(fechaImp);
+    fechaVal.setFullYear(fechaVal.getFullYear() + 1);
+
+    const puntosCliente = (clientesFidelidad.find((f: any) => f.id === venta?.cliente_id)?.puntos_disponibles ?? 0);
+    const subtotal = Number(venta?.subtotal ?? 0);
+    const descuento = Number(venta?.descuento_total ?? 0);
+    const itbis = Number(venta?.itbis_total ?? 0);
+    const total = Number(venta?.total ?? 0);
+
+    const w = preopened ?? window.open('', '_blank', 'width=420,height=900');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8" /><title>Factura ${venta?.numero_interno || ''}</title>
+      <style>
+        @page { size: 80mm auto; margin: 2mm; }
+        * { font-family: Arial, sans-serif; font-weight: 700; color: #000; }
+        html, body { width: 76mm; margin: 0; padding: 0; }
+        body { margin: 2mm; font-size: 12px; }
+        .center { text-align: center; }
+        .line { border-top: 1px solid #000; margin: 6px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { padding: 3px 2px; text-align: left; border-bottom: 1px solid #000; }
+        .right { text-align: right; }
+        .tot td { border-bottom: none; }
+      </style>
+    </head><body>
+      <div class="center">
+        <img src="${window.location.origin}/logo-repuestos-calcano.svg" alt="logo" style="height:88px; width:auto; display:block; margin:0 auto;" />
+        <div>IMPORTADORA REPUESTOS CALCAÑO</div>
+      </div>
+      <div class="line"></div>
+      <div>FACTURA#: ${venta?.numero_interno || ''} (${metodoPago.toUpperCase()})</div>
+      <div>NCF: ${venta?.ncf || '-'}</div>
+      <div>TIPO TRANSACCIÓN: ${String(venta?.tipo_comprobante || 'consumidor_final').replaceAll('_',' ').toUpperCase()}</div>
+      <div>DESDE: ${fechaImp.toLocaleDateString('es-DO')} ${fechaImp.toLocaleTimeString('es-DO')}</div>
+      <div>HASTA: ${fechaVal.toLocaleDateString('es-DO')}</div>
+      <div class="line"></div>
+      <div>CLIENTE:</div>
+      <div>${clienteNombre}</div>
+      <div>RNC: ${clienteRnc || '-'}</div>
+      <div class="line"></div>
+      <table>
+        <thead><tr><th>Cantidad</th><th>Precio</th><th>ITBIS</th><th>Neto unid.</th><th class="right">Total</th></tr></thead>
+        <tbody>
+          ${detalle.map((d: any) => {
+            const cantidad = Number(d.cantidad || 0);
+            const totalLinea = Number(d.subtotal_linea || 0);
+            const netoUnitario = cantidad > 0 ? (totalLinea / cantidad) : 0;
+            return `<tr><td colspan="5">${d.descripcion}</td></tr><tr><td>${cantidad.toFixed(0)}</td><td>${Number(d.precio_unitario).toFixed(2)}</td><td>${Number(d.itbis_monto).toFixed(2)}</td><td>${netoUnitario.toFixed(2)}</td><td class="right">${totalLinea.toFixed(2)}</td></tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="line"></div>
+      <table class="tot">
+        <tr><td>SUB TOTAL</td><td class="right">${subtotal.toFixed(2)}</td></tr>
+        <tr><td>DESCUENTO</td><td class="right">${descuento.toFixed(2)}</td></tr>
+        <tr><td>RECARGO</td><td class="right">0.00</td></tr>
+        <tr><td>ITBIS</td><td class="right">${itbis.toFixed(2)}</td></tr>
+        <tr><td style="font-size:18px;">TOTAL</td><td class="right" style="font-size:22px;">${total.toFixed(2)}</td></tr>
+        <tr><td>PAGO</td><td class="right">${Number(pagoCliente).toFixed(2)}</td></tr>
+        <tr><td>DEVUELTA</td><td class="right">${Number(devuelta).toFixed(2)}</td></tr>
+      </table>
+      <div class="line"></div>
+      <div class="center">GRACIAS POR SU COMPRA</div>
+      ${Number(puntosCliente) > 0 ? `<div class="center">PUNTOS ACUMULADOS: ${Number(puntosCliente).toLocaleString('es-DO')}</div>` : ''}
+    </body></html>`);
+    w.document.close();
+    await esperarRecursosImpresion(w);
+    w.focus();
+    w.print();
+  }
+
   async function enviarVenta() {
-    if (!clienteId || !sucursalId || !vendedorId) return toast('error', 'Cliente, sucursal y vendedor son obligatorios');
+    if (!sucursalId || !vendedorId) return toast('error', 'Sucursal y vendedor son obligatorios');
     if (formaPago === 'nota_credito' && !ncEncontrada) {
       toast('error', 'Selecciona una Nota de Crédito válida');
       setModalAplicarNC(true);
@@ -615,15 +812,26 @@ function App() {
       const descGlob = descuentoGlobal > 0 ? base * (descuentoGlobal / 100) : 0;
       return { ...i, descuento_monto: descItem + descGlob };
     });
-    const payload = { cliente_id: clienteId, sucursal_id: sucursalId, vendedor_id: vendedorId, tipo_venta: tipoVenta, forma_pago: formaPago, items: carritoFinal, tipo_comprobante: clienteSel?.tipo_comprobante_fiscal, nota_credito_codigo: ncEncontrada?.numero };
+    const formaPagoFinal = usuario.rol === 'vendedor' ? 'pendiente' : formaPago;
+    if (tipoComprobante !== 'consumidor_final' && !fiscalRnc.trim()) { toast('error', 'RNC obligatorio para comprobante fiscal'); return; }
+    if (tipoComprobante !== 'consumidor_final' && !fiscalEmpresa.trim()) { toast('error', 'No se pudo autocompletar la empresa con ese RNC'); return; }
+    const payload = { cliente_id: clienteId || null, cliente_nombre_libre: clienteNombreLibre?.trim() || 'PORTADOR', fiscal_rnc: fiscalRnc.trim() || null, fiscal_empresa: fiscalEmpresa.trim() || null, sucursal_id: sucursalId, vendedor_id: vendedorId, tipo_venta: tipoVenta, forma_pago: formaPagoFinal, items: carritoFinal, tipo_comprobante: tipoComprobante, nota_credito_codigo: ncEncontrada?.numero };
     const v = await api<any>('/ventas', token, { method: 'POST', body: JSON.stringify(payload) });
-    if (tipoVenta === 'contado') await api(`/ventas/${v.id}/enviar-cajero`, token, { method: 'POST' });
+    if (tipoVenta === 'contado') {
+      if (usuario.rol === 'cajero') {
+        await api(`/ventas/${v.id}/preparar-cobro-directo`, token, { method: 'POST' });
+        const ventaLista = await api<any>(`/ventas/${v.id}`, token);
+        setCajaCobrarModal(ventaLista.venta);
+      } else {
+        await api(`/ventas/${v.id}/enviar-cajero`, token, { method: 'POST' });
+      }
+    }
 
     if (formaPago === 'nota_credito' && ncEncontrada) {
       const totalFinal = carritoFinal.reduce((a: number, i: any) => {
         const base = Number(i.cantidad) * Number(i.precio_unitario);
         const desc = Number(i.descuento_monto ?? 0);
-        return a + base + (base - desc) * Number(i.itbis_tasa ?? 0.18) - desc;
+        return a + (base - desc);
       }, 0);
       const resultado = await api<any>('/notas-credito/aplicar', token, {
         method: 'POST',
@@ -644,12 +852,14 @@ function App() {
     } else {
       toast('ok', tipoVenta === 'contado' ? 'Venta enviada a caja' : 'Venta a crédito registrada');
     }
-    setCarrito([]); setDescuentoGlobal(0); setClienteId(''); setClienteQuery(''); setFormaPago('efectivo'); await cargarTodo();
+    setCarrito([]); setDescuentoGlobal(0); setClienteQuery('PORTADOR'); setClienteNombreLibre('PORTADOR'); setFormaPago('efectivo'); setTipoComprobante('consumidor_final'); await cargarTodo();
   }
 
   async function tomarVentaCaja(id: string) {
     await api(`/ventas/${id}/tomar-en-caja`, token, { method: 'POST' });
-    toast('ok', 'Venta tomada en caja');
+    const checks = await api<any[]>(`/ventas/${id}/caja-checklist`, token);
+    setCajaChecklistModal({ venta_id: id, items: checks });
+    toast('ok', 'Venta tomada en revisión de caja');
     await cargarTodo();
   }
 
@@ -657,6 +867,20 @@ function App() {
     setCajaCobrarModal(v);
     setCajaTipoPago('efectivo');
     setCajaMontoRecibido('');
+    setCajaMixtoEfectivo(Number(v.total ?? 0).toFixed(2));
+    setCajaMixtoOtroTipo('tarjeta');
+  }
+
+
+  async function confirmarItemCaja(ventaId: string, checkId: string) {
+    const r = await api<any>(`/ventas/${ventaId}/caja-checklist/${checkId}`, token, { method: 'POST' });
+    const checks = await api<any[]>(`/ventas/${ventaId}/caja-checklist`, token);
+    setCajaChecklistModal((m: any) => ({ ...(m || {}), items: checks, pendientes: r.pendientes }));
+    if (r.pendientes === 0) {
+      toast('ok', 'Todos los productos fueron confirmados. Lista para cobro.');
+      setCajaChecklistModal(null);
+      await cargarTodo();
+    }
   }
 
   async function cobrarCuentaCxC(cuenta: any) {
@@ -853,7 +1077,7 @@ function App() {
                 ) : null}
               </div>
             </div>
-            <div className="pos-field">
+            {usuario.rol !== 'vendedor' && <div className="pos-field">
               <label>Forma de pago</label>
               <select value={formaPago} onChange={(e) => {
                 const v = e.target.value;
@@ -870,7 +1094,28 @@ function App() {
                 <option value="mixto">Mixto</option>
                 <option value="nota_credito">📄 Nota de Crédito</option>
               </select>
+            </div>}
+            <div>
+              <label>Tipo de comprobante</label>
+              <select value={tipoComprobante} onChange={(e) => setTipoComprobante(e.target.value)}>
+                {ncfTipos.map((t) => <option key={t.id} value={t.codigo}>{t.nombre}</option>)}
+                {ncfTipos.length === 0 && <option value="consumidor_final">Consumidor Final</option>}
+              </select>
             </div>
+            {tipoComprobante !== 'consumidor_final' && (
+              <>
+                <div>
+                  <label>RNC</label>
+                  <input value={fiscalRnc} onChange={(e) => setFiscalRnc(e.target.value)} placeholder="RNC" />
+                </div>
+                <div style={{ gridColumn: '1 / -1', fontSize: 12, fontWeight: 700 }}>
+                  {rncEstado === 'consultando' && rncMensaje}
+                  {rncEstado === 'actualizando' && 'Actualizando catálogo DGII para validar este RNC...'}
+                  {rncEstado === 'encontrado' && `✅ ${rncMensaje}`}
+                  {rncEstado === 'no_encontrado' && `⚠️ ${rncMensaje}`}
+                </div>
+              </>
+            )}
           </div>
 
           {clienteSel && (
@@ -927,6 +1172,7 @@ function App() {
         </article>
 
         <article className="panel-card span-4">
+          <div style={{ marginBottom: 8, padding: '8px 10px', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8 }}><strong>NCF:</strong> {ncfPreview || '—'}</div>
           <h3>🛒 Resumen de compra</h3>
           
           {carrito.length > 0 && (
@@ -943,7 +1189,7 @@ function App() {
                         </td>
                         <td style={{ padding: '6px 4px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70px' }}>{i.descripcion}</td>
                         <td style={{ padding: '6px 4px', textAlign: 'center', minWidth: '30px' }}>{i.cantidad}</td>
-                        <td style={{ padding: '6px 4px', textAlign: 'right', minWidth: '50px', fontWeight: 700 }}>RD$ {(Number(i.cantidad) * Number(i.precio_unitario) * (1 + Number(i.itbis_tasa))).toFixed(2)}</td>
+                        <td style={{ padding: '6px 4px', textAlign: 'right', minWidth: '50px', fontWeight: 700 }}>RD$ {(Number(i.cantidad) * Number(i.precio_unitario)).toFixed(2)}</td>
                         <td style={{ padding: '6px 4px', textAlign: 'center', minWidth: '24px' }}><button className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: 10 }} onClick={() => setCarrito((c) => c.filter((_, j) => j !== idx))}>✕</button></td>
                       </tr>
                     ))}
@@ -988,7 +1234,7 @@ function App() {
           <div className="money-line"><span>Balance pendiente</span><strong>RD$ {tipoVenta === 'credito' ? total.toFixed(2) : '0.00'}</strong></div>
           <div className="money-line"><span>Estado</span><strong>{tipoVenta === 'credito' ? 'Crédito' : 'Contado'}</strong></div>
 
-          {(formaPago === 'efectivo' || formaPago === 'mixto') && tipoVenta === 'contado' && (() => {
+          {usuario.rol !== 'vendedor' && (formaPago === 'efectivo' || formaPago === 'mixto') && tipoVenta === 'contado' && (() => {
             const totalCobrar = formaPago === 'nota_credito' && ncEncontrada
               ? Math.max(0, total - Math.min(Number(ncEncontrada.monto_restante), total))
               : total;
@@ -1422,10 +1668,35 @@ function App() {
         </div>
       )}
 
+
+      {cajaChecklistModal && (
+        <div className="modal-overlay" onClick={() => setCajaChecklistModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
+            <h3>✅ Validación física en caja</h3>
+            <table className="table-premium">
+              <thead><tr><th>Producto</th><th>Cantidad</th><th>P/U</th><th>Total</th><th>OK</th></tr></thead>
+              <tbody>
+                {cajaChecklistModal.items?.map((it: any) => (
+                  <tr key={it.check_id}>
+                    <td>{it.descripcion}</td>
+                    <td>{it.cantidad}</td>
+                    <td>RD$ {Number(it.precio_unitario).toFixed(2)}</td>
+                    <td>RD$ {Number(it.subtotal_linea).toFixed(2)}</td>
+                    <td>{it.confirmado ? '✔' : <button className="btn btn-primary" onClick={() => confirmarItemCaja(cajaChecklistModal.venta_id, it.check_id).catch((e) => toast('error', e.message))}>Confirmar</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {cajaCobrarModal && (() => {
         const ventaTotal = Number(cajaCobrarModal.total ?? 0);
         const recibNum = parseFloat(cajaMontoRecibido) || 0;
-        const vueltoCaja = cajaTipoPago === 'efectivo' ? Math.max(0, recibNum - ventaTotal) : 0;
+        const mixtoEfectivo = Math.max(0, Number(cajaMixtoEfectivo || 0));
+        const mixtoOtroMonto = Math.max(0, ventaTotal - mixtoEfectivo);
+        const vueltoCaja = (cajaTipoPago === 'efectivo' || cajaTipoPago === 'mixto') ? Math.max(0, recibNum - (cajaTipoPago === 'mixto' ? mixtoEfectivo : ventaTotal)) : 0;
         return (
           <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setCajaCobrarModal(null); }}>
             <div className="modal-card" style={{ maxWidth: 420 }}>
@@ -1439,13 +1710,29 @@ function App() {
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>Forma de pago:</label>
-                <select value={cajaTipoPago} onChange={(e) => { setCajaTipoPago(e.target.value); setCajaMontoRecibido(''); }} style={{ width: '100%' }}>
+                <select value={cajaTipoPago} onChange={(e) => { const v=e.target.value; setCajaTipoPago(v); setCajaMontoRecibido(''); if (v==='mixto') setCajaMixtoEfectivo(ventaTotal.toFixed(2)); }} style={{ width: '100%' }}>
                   <option value="efectivo">Efectivo</option>
                   <option value="tarjeta">Tarjeta</option>
                   <option value="transferencia">Transferencia</option>
                   <option value="mixto">Mixto</option>
                 </select>
               </div>
+
+              {cajaTipoPago === 'mixto' && (
+                <div style={{ marginBottom: 14, border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
+                  <label style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>Efectivo aplicado:</label>
+                  <input type="number" min={0} max={ventaTotal} step="0.01" value={cajaMixtoEfectivo}
+                    onChange={(e) => { const val = Math.max(0, Math.min(ventaTotal, Number(e.target.value || 0))); setCajaMixtoEfectivo(val.toFixed(2)); setCajaMontoRecibido(val.toFixed(2)); }}
+                    style={{ width: '100%', marginBottom: 8 }} />
+                  <label style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>Otra forma de pago:</label>
+                  <select value={cajaMixtoOtroTipo} onChange={(e) => setCajaMixtoOtroTipo(e.target.value)} style={{ width: '100%', marginBottom: 8 }}>
+                    <option value="tarjeta">Tarjeta</option>
+                    <option value="transferencia">Transferencia</option>
+                  </select>
+                  <div style={{ fontSize: 14 }}>Monto automático {cajaMixtoOtroTipo}: <strong>RD$ {mixtoOtroMonto.toFixed(2)}</strong></div>
+                </div>
+              )}
+
               {(cajaTipoPago === 'efectivo' || cajaTipoPago === 'mixto') && (
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontWeight: 600, display: 'block', marginBottom: 6 }}>💵 Monto recibido en efectivo:</label>
@@ -1474,23 +1761,29 @@ function App() {
               )}
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
-                  if ((cajaTipoPago === 'efectivo' || cajaTipoPago === 'mixto') && recibNum < ventaTotal) {
+                  if (cajaTipoPago === 'efectivo' && recibNum < ventaTotal) {
                     toast('error', `Monto recibido insuficiente. Faltan RD$ ${(ventaTotal - recibNum).toFixed(2)}`);
                     return;
                   }
+                  if (cajaTipoPago === 'mixto' && (mixtoEfectivo <= 0 || mixtoEfectivo >= ventaTotal)) {
+                    toast('error', 'En mixto el efectivo debe ser mayor a 0 y menor al total');
+                    return;
+                  }
                   try {
+                    const printWin = window.open('', '_blank', 'width=420,height=900');
                     await api(`/ventas/${cajaCobrarModal.id}/cobrar`, token, {
                       method: 'POST',
                       body: JSON.stringify({
                         tipo_pago: cajaTipoPago,
-                        monto_efectivo: cajaTipoPago === 'efectivo' || cajaTipoPago === 'mixto' ? ventaTotal : 0,
-                        monto_tarjeta: cajaTipoPago === 'tarjeta' ? ventaTotal : 0,
-                        monto_transferencia: cajaTipoPago === 'transferencia' ? ventaTotal : 0,
-                        monto_recibido: cajaTipoPago === 'efectivo' || cajaTipoPago === 'mixto' ? recibNum : 0,
+                        monto_efectivo: cajaTipoPago === 'efectivo' ? ventaTotal : (cajaTipoPago === 'mixto' ? mixtoEfectivo : 0),
+                        monto_tarjeta: cajaTipoPago === 'tarjeta' ? ventaTotal : (cajaTipoPago === 'mixto' && cajaMixtoOtroTipo === 'tarjeta' ? mixtoOtroMonto : 0),
+                        monto_transferencia: cajaTipoPago === 'transferencia' ? ventaTotal : (cajaTipoPago === 'mixto' && cajaMixtoOtroTipo === 'transferencia' ? mixtoOtroMonto : 0),
+                        monto_recibido: cajaTipoPago === 'efectivo' ? recibNum : (cajaTipoPago === 'mixto' ? Math.max(recibNum, mixtoEfectivo) : 0),
                       }),
                     });
                     if (vueltoCaja > 0) toast('ok', `✅ Cobrada — Vuelto: RD$ ${vueltoCaja.toFixed(2)}`);
                     else toast('ok', `✅ Venta ${cajaCobrarModal.numero_interno} cobrada`);
+                    await imprimirFacturaVenta(cajaCobrarModal.id, cajaTipoPago, cajaTipoPago === 'mixto' ? ventaTotal : ((cajaTipoPago === 'efectivo') ? recibNum : ventaTotal), vueltoCaja, printWin);
                     setCajaCobrarModal(null);
                     await cargarTodo();
                   } catch (e: any) {
@@ -1554,6 +1847,7 @@ function App() {
                     return;
                   }
                   try {
+                    const printWin = window.open('', '_blank', 'width=420,height=900');
                     await api(`/ventas/${modalNcDiferencia.venta_id}/cobrar`, token, {
                       method: 'POST',
                       body: JSON.stringify({
@@ -1567,6 +1861,7 @@ function App() {
                     });
                     if (vueltoNc > 0) toast('ok', `✅ Cobro registrado — Vuelto: RD$ ${vueltoNc.toFixed(2)}`);
                     else toast('ok', '✅ Pago complementario registrado');
+                    await imprimirFacturaVenta(modalNcDiferencia.venta_id, formaPagoComplementario, formaPagoComplementario === 'efectivo' ? recibidoNum : difVal, vueltoNc, printWin);
                     setModalNcDiferencia(null);
                     await cargarTodo();
                   } catch (e: any) {
@@ -1587,21 +1882,83 @@ function App() {
             <span className="chip chip-warning">{pendientes.length} pendientes</span>
           </div>
           <table className="table-premium">
-            <thead><tr><th>Turno</th><th>Cliente</th><th>Total</th><th>Sucursal</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Turno</th><th>Cliente</th><th>Tipo factura</th><th>Fiscal</th><th>Total</th><th>Sucursal</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
-              {pendientes.length === 0 ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24 }}>No hay ventas pendientes en caja</td></tr> : pendientes.map((p) => (
+              {pendientes.length === 0 ? <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24 }}>No hay ventas pendientes en caja</td></tr> : pendientes.map((p) => (
                 <tr key={p.id}>
                   <td><strong>{p.numero_interno}</strong></td>
                   <td>{p.cliente_nombre}</td>
+                  <td>{String(p.tipo_comprobante || 'consumidor_final').replaceAll('_',' ')}</td>
+                  <td>{p.tipo_comprobante && p.tipo_comprobante !== 'consumidor_final' ? `${p.fiscal_empresa || p.cliente_nombre} / ${p.fiscal_rnc || '-'}` : '-'}</td>
                   <td>RD$ {Number(p.total).toFixed(2)}</td>
                   <td>{p.sucursal_nombre || p.sucursal_id || '-'}</td>
                   <td>{p.estado}</td>
                   <td style={{ display: 'flex', gap: 6 }}>
                     {p.estado === 'enviada_a_caja' && <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 8px' }} onClick={() => tomarVentaCaja(p.id).catch((e) => toast('error', e.message))}>Tomar</button>}
-                    {p.estado === 'en_caja' && <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 8px' }} onClick={() => cobrarVentaCaja(p)}>Cobrar</button>}
+                    {p.estado === 'lista_para_cobro' && <button className="btn btn-primary" style={{ fontSize: 12, padding: '4px 8px' }} onClick={() => cobrarVentaCaja(p)}>Cobrar</button>}
+                    {p.estado === 'en_revision_caja' && <span className="chip chip-warning">En revisión</span>}
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </article>
+      )}
+
+
+
+      {modulo === 'dgii' && usuario.rol === 'administrador' && (
+        <article className="panel-card">
+          <div className="panel-head">
+            <h3>Catálogo DGII RNC</h3>
+            <button className="btn btn-primary" onClick={async () => { const d = await api<any>('/dgii/sync-now', token); setDgiiPanel(d); toast('ok', d.ok ? 'Catálogo actualizado' : 'No se pudo actualizar'); }}>Actualizar catálogo ahora</button>
+          </div>
+          <button className="btn btn-ghost" onClick={async () => setDgiiPanel(await api<any>('/dgii/status', token))}>Refrescar estado</button>
+          {dgiiPanel && (
+            <div style={{ marginTop: 12 }}>
+              <div>Última actualización exitosa: <strong>{dgiiPanel.ultimo_ok?.inicio || '-'}</strong></div>
+              <div>Total registros: <strong>{dgiiPanel.total_registros ?? 0}</strong></div>
+              <div>Último error: <strong>{dgiiPanel.ultimo_error?.mensaje_error || '-'}</strong></div>
+              <h4>Historial reciente</h4>
+              <table className="table-premium"><thead><tr><th>Inicio</th><th>Estado</th><th>Tipo</th><th>Formato</th><th>Error</th></tr></thead><tbody>
+                {(dgiiPanel.logs || []).map((l: any) => <tr key={l.id}><td>{l.inicio}</td><td>{l.estado}</td><td>{l.tipo_ejecucion}</td><td>{l.formato}</td><td>{l.mensaje_error || '-'}</td></tr>)}
+              </tbody></table>
+            </div>
+          )}
+        </article>
+      )}
+
+      {modulo === 'ncf' && usuario.rol === 'administrador' && (
+        <article className="panel-card">
+          <div className="panel-head">
+            <h3>Configuración de rangos de comprobantes (NCF)</h3>
+            <span className="chip chip-warning">{ncfTipos.length} tipos</span>
+          </div>
+          <p style={{ color: 'var(--muted)', marginBottom: 12 }}>Configura el rango completo por tipo: <strong>Desde</strong> y <strong>Hasta</strong>. El sistema seguirá la secuencia automáticamente.</p>
+          <table className="table-premium">
+            <thead>
+              <tr><th>Tipo</th><th>Prefijo</th><th>Desde</th><th>Hasta</th><th>Usados</th><th>Activo</th><th>Guardar</th></tr>
+            </thead>
+            <tbody>
+              {ncfTipos.map((t) => {
+                const row = ncfEdit[t.id] ?? {};
+                return (
+                  <tr key={t.id}>
+                    <td>{t.nombre}</td>
+                    <td><input value={row.prefijo_fiscal ?? ''} onChange={(e) => setNcfEdit((m) => ({ ...m, [t.id]: { ...row, prefijo_fiscal: e.target.value } }))} style={{ width: 100 }} /></td>
+                    <td><input type="number" value={row.secuencia_inicial ?? 1} onChange={(e) => setNcfEdit((m) => ({ ...m, [t.id]: { ...row, secuencia_inicial: Number(e.target.value) } }))} style={{ width: 110 }} /></td>
+                    <td><input type="number" value={row.secuencia_final ?? 1} onChange={(e) => setNcfEdit((m) => ({ ...m, [t.id]: { ...row, secuencia_final: Number(e.target.value) } }))} style={{ width: 110 }} /></td>
+                    <td>{(() => { const usados = Math.max(0, Number(row.secuencia_actual ?? row.secuencia_inicial ?? 1) - Number(row.secuencia_inicial ?? 1)); const total = Math.max(1, Number(row.secuencia_final ?? 1) - Number(row.secuencia_inicial ?? 1) + 1); const pct = Math.min(100, Math.round((usados / total) * 100)); return `${usados} de ${total} (${pct}%)`; })()}</td>
+                    <td>
+                      <select value={String(row.activo ?? 1)} onChange={(e) => setNcfEdit((m) => ({ ...m, [t.id]: { ...row, activo: Number(e.target.value) } }))}>
+                        <option value="1">Activo</option>
+                        <option value="0">Inactivo</option>
+                      </select>
+                    </td>
+                    <td><button className="btn btn-primary" onClick={() => guardarRangoNcf(t.id).catch((e) => toast('error', e.message))}>Guardar</button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </article>
