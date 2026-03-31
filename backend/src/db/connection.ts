@@ -70,6 +70,11 @@ function asegurarMigraciones() {
   agregarColumnaSiFalta('ventas', 'forma_pago TEXT', 'forma_pago');
   agregarColumnaSiFalta('ventas', 'descuento_total REAL NOT NULL DEFAULT 0', 'descuento_total');
   agregarColumnaSiFalta('ventas', 'balance_pendiente REAL NOT NULL DEFAULT 0', 'balance_pendiente');
+  agregarColumnaSiFalta('ventas', "invoice_type_code TEXT NOT NULL DEFAULT 'consumidor_final'", 'invoice_type_code');
+  agregarColumnaSiFalta('ventas', 'ncf_sequence_value INTEGER', 'ncf_sequence_value');
+  agregarColumnaSiFalta('ventas', 'cliente_nombre_libre TEXT', 'cliente_nombre_libre');
+  agregarColumnaSiFalta('ventas', 'fiscal_rnc TEXT', 'fiscal_rnc');
+  agregarColumnaSiFalta('ventas', 'fiscal_empresa TEXT', 'fiscal_empresa');
 
   // Tabla sucursales
   db.exec(`CREATE TABLE IF NOT EXISTS sucursales (
@@ -253,13 +258,208 @@ function asegurarMigraciones() {
     FOREIGN KEY (job_id) REFERENCES import_jobs(id) ON DELETE CASCADE
   )`);
 
-    db.exec('CREATE INDEX IF NOT EXISTS idx_clientes_codigo ON clientes(codigo)');
+  
+
+  db.exec(`CREATE TABLE IF NOT EXISTS capacidades (
+    id TEXT PRIMARY KEY,
+    codigo TEXT UNIQUE NOT NULL,
+    nombre TEXT NOT NULL,
+    fecha_creacion TEXT NOT NULL
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS usuario_capacidades (
+    id TEXT PRIMARY KEY,
+    usuario_id TEXT NOT NULL,
+    capacidad_id TEXT NOT NULL,
+    fecha_creacion TEXT NOT NULL,
+    UNIQUE(usuario_id, capacidad_id),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (capacidad_id) REFERENCES capacidades(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS ncf_types (
+    id TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    codigo TEXT UNIQUE NOT NULL,
+    prefijo_fiscal TEXT NOT NULL,
+    activo INTEGER NOT NULL DEFAULT 1,
+    fecha_vigencia_desde TEXT,
+    fecha_vigencia_hasta TEXT,
+    observaciones TEXT,
+    fecha_creacion TEXT NOT NULL,
+    fecha_actualizacion TEXT NOT NULL
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS ncf_sequences (
+    id TEXT PRIMARY KEY,
+    ncf_type_id TEXT NOT NULL UNIQUE,
+    secuencia_inicial INTEGER NOT NULL,
+    secuencia_actual INTEGER NOT NULL,
+    secuencia_final INTEGER NOT NULL,
+    fecha_creacion TEXT NOT NULL,
+    fecha_actualizacion TEXT NOT NULL,
+    FOREIGN KEY (ncf_type_id) REFERENCES ncf_types(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS cash_queue (
+    id TEXT PRIMARY KEY,
+    venta_id TEXT NOT NULL UNIQUE,
+    estado TEXT NOT NULL,
+    tomado_por_usuario_id TEXT,
+    fecha_tomada TEXT,
+    fecha_creacion TEXT NOT NULL,
+    fecha_actualizacion TEXT NOT NULL,
+    FOREIGN KEY (venta_id) REFERENCES ventas(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS cash_item_checks (
+    id TEXT PRIMARY KEY,
+    venta_id TEXT NOT NULL,
+    detalle_venta_id TEXT NOT NULL,
+    confirmado INTEGER NOT NULL DEFAULT 0,
+    confirmado_por_usuario_id TEXT,
+    fecha_confirmacion TEXT,
+    UNIQUE(venta_id, detalle_venta_id),
+    FOREIGN KEY (venta_id) REFERENCES ventas(id),
+    FOREIGN KEY (detalle_venta_id) REFERENCES detalle_ventas(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    numero_orden TEXT UNIQUE NOT NULL,
+    cliente_id TEXT NOT NULL,
+    usuario_creador_id TEXT NOT NULL,
+    venta_origen_id TEXT,
+    estado TEXT NOT NULL,
+    observaciones TEXT,
+    pago_registrado INTEGER NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    fecha_creacion TEXT NOT NULL,
+    fecha_actualizacion TEXT NOT NULL,
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+    FOREIGN KEY (usuario_creador_id) REFERENCES usuarios(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS order_items (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    producto_id TEXT NOT NULL,
+    descripcion TEXT NOT NULL,
+    marca TEXT,
+    ubicacion TEXT,
+    cantidad REAL NOT NULL,
+    precio_unitario REAL NOT NULL,
+    encontrado INTEGER NOT NULL DEFAULT 0,
+    cantidad_verificada REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (producto_id) REFERENCES productos(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS order_assignments (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    picker_usuario_id TEXT NOT NULL,
+    assigned_by_usuario_id TEXT NOT NULL,
+    fecha_creacion TEXT NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (picker_usuario_id) REFERENCES usuarios(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS order_verifications (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    order_item_id TEXT NOT NULL,
+    verifier_usuario_id TEXT NOT NULL,
+    bundle_id TEXT,
+    cantidad_esperada REAL NOT NULL,
+    cantidad_verificada REAL NOT NULL,
+    confirmado INTEGER NOT NULL DEFAULT 0,
+    fecha_creacion TEXT NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (order_item_id) REFERENCES order_items(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS bundles (
+    id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    numero_bulto INTEGER NOT NULL,
+    estado TEXT NOT NULL,
+    cerrado_por_usuario_id TEXT,
+    fecha_cierre TEXT,
+    etiqueta_impresa_en TEXT,
+    fecha_creacion TEXT NOT NULL,
+    fecha_actualizacion TEXT NOT NULL,
+    UNIQUE(order_id, numero_bulto),
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS bundle_items (
+    id TEXT PRIMARY KEY,
+    bundle_id TEXT NOT NULL,
+    order_item_id TEXT NOT NULL,
+    cantidad REAL NOT NULL,
+    fecha_creacion TEXT NOT NULL,
+    FOREIGN KEY (bundle_id) REFERENCES bundles(id),
+    FOREIGN KEY (order_item_id) REFERENCES order_items(id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS price_override_logs (
+    id TEXT PRIMARY KEY,
+    usuario_id TEXT NOT NULL,
+    venta_id TEXT,
+    order_id TEXT,
+    order_item_id TEXT,
+    producto_id TEXT,
+    precio_original REAL NOT NULL,
+    precio_nuevo REAL NOT NULL,
+    motivo TEXT,
+    fecha_creacion TEXT NOT NULL
+  )`);
+
+
+
+  db.exec(`CREATE TABLE IF NOT EXISTS dgii_rnc (
+    id TEXT PRIMARY KEY,
+    rnc TEXT NOT NULL UNIQUE,
+    razon_social TEXT,
+    nombre_comercial TEXT,
+    categoria TEXT,
+    regimen_pagos TEXT,
+    estado TEXT,
+    actividad_economica TEXT,
+    administracion_local TEXT,
+    facturador_electronico TEXT,
+    fuente TEXT,
+    fecha_actualizacion_fuente TEXT,
+    creado_en TEXT NOT NULL,
+    actualizado_en TEXT NOT NULL
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS dgii_rnc_sync_log (
+    id TEXT PRIMARY KEY,
+    inicio TEXT NOT NULL,
+    fin TEXT,
+    estado TEXT NOT NULL,
+    tipo_ejecucion TEXT NOT NULL,
+    cantidad_insertados INTEGER NOT NULL DEFAULT 0,
+    cantidad_actualizados INTEGER NOT NULL DEFAULT 0,
+    cantidad_omitidos INTEGER NOT NULL DEFAULT 0,
+    url_origen TEXT,
+    formato TEXT,
+    mensaje_error TEXT,
+    archivo_descargado TEXT,
+    hash_archivo TEXT
+  )`);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_clientes_codigo ON clientes(codigo)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_clientes_doc ON clientes(cedula_rnc)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_productos_barra ON productos(codigo_barras)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_productos_categoria ON productos(categoria)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_ventas_sucursal ON ventas(sucursal_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_compras_sucursal ON compras(sucursal_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_mov_inv_ref ON movimientos_inventario(referencia_tipo, referencia_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_dgii_rnc_rnc ON dgii_rnc(rnc)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_dgii_rnc_razon ON dgii_rnc(razon_social)');
 
   const now = new Date().toISOString();
 

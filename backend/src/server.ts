@@ -20,6 +20,10 @@ import { comprasRouter } from './modulos/compras/routes.js';
 import { importadorRouter } from './modulos/importador/routes.js';
 import { uploadsRouter } from './modulos/uploads/routes.js';
 import { notasCreditoRouter } from './modulos/notas-credito/routes.js';
+import { ncfRouter } from './modulos/ncf/routes.js';
+import { ordersRouter } from './modulos/orders/routes.js';
+import { dgiiRouter } from './modulos/dgii/routes.js';
+import { startDgiiSyncJob } from './modulos/dgii/service.js';
 
 inicializarSeed();
 
@@ -44,9 +48,13 @@ app.use('/api/compras', comprasRouter);
 app.use('/api/importador', importadorRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/notas-credito', notasCreditoRouter);
+app.use('/api/ncf', ncfRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/dgii', dgiiRouter);
 
 const server = http.createServer(app);
 iniciarHub(server);
+startDgiiSyncJob();
 server.listen(env.puerto, () => {
   console.log(`Servidor POS local escuchando en puerto ${env.puerto}`);
 });
